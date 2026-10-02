@@ -1,81 +1,64 @@
-# Diageo Valuation Data Puller
+# Diageo Valuation — DCF, Trading Comps & Precedent Transactions
 
-A Python script that pulls the live market data needed for a DCF / trading comps /
-precedent transactions valuation model of **Diageo plc (NYSE: DEO)** — built as the
-data-automation companion to a full Excel valuation model, as part of my prep for
-finance placement applications (Lloyds Banking Group CIB Markets, SMBC).
+A full equity research exercise on **Diageo plc (NYSE: DEO / LSE: DGE)**, built as a personal
+project during placement-application preparation. It has three parts:
 
-It fetches, via [yfinance](https://github.com/ranaroussi/yfinance):
-- Diageo's own price, shares outstanding, beta, debt, cash, EBITDA, and revenue
-- The same for four listed peers — Pernod Ricard, Rémy Cointreau, Davide
-  Campari-Milano, and Constellation Brands
-- The 10-year US Treasury yield (risk-free rate, for the WACC build-up)
+| File | What it is |
+|---|---|
+| **[`Diageo_Research_Note.pdf`](./Diageo_Research_Note.pdf)** | 2-page research note — the conclusion. View, valuation summary, key drivers, risks. **Start here.** |
+| **[`Diageo_DCF_Comps_Precedent_Valuation.xlsx`](./Diageo_DCF_Comps_Precedent_Valuation.xlsx)** | The valuation model — DCF (Gordon Growth + exit multiple cross-check), WACC build-up, trading comps, precedent transactions, and a football field summary. Every figure in the note traces back to a formula in this workbook. |
+| **[`pull_valuation_data.py`](./pull_valuation_data.py)** | A Python pipeline (`yfinance`, `pandas`) that pulls live market data for Diageo and four listed peers — price, shares outstanding, beta, debt, cash, EBITDA, revenue — and the 10-year US Treasury yield, with correct multi-currency handling (EUR/USD) and enterprise value computed from first principles rather than trusted from a vendor's precomputed field. |
 
-...and computes enterprise value and EV/EBITDA and EV/Revenue multiples for each,
-correctly handling companies quoted in different currencies (EUR vs. USD).
+## The headline
+
+At $86.41 (11 Sep 2026), Diageo shares screen as **fairly valued to modestly undervalued**:
+trading comps imply a fair value of $88.94 (+2.9%), the DCF base case implies $109.75 (+27%,
+conditional on management's margin-recovery programme landing), and precedent M&A transactions
+imply $57–$193 (median $138) — a much wider, control-premium-inflated range used here as
+context rather than a primary valuation anchor. Full reasoning is in the research note.
 
 ## Why this exists
 
-Most of the finance side of a placement application is built in Excel with numbers
-typed in by hand. This script automates the data-gathering layer instead — the kind
-of overlap between software engineering and finance that isn't common in either
-direction.
+Most of the finance side of a placement application is built in Excel with numbers typed in by
+hand. This project pairs that with a data-automation layer — showing both sides: the valuation
+judgement (what a methodology is actually telling you, and when to trust one method over another)
+and the engineering discipline to source the inputs correctly rather than trusting a vendor API
+at face value.
+
+## Three data bugs caught building this
+
+Documented in full in the research note's Methodology section, and in more technical detail in
+the Python script's comments:
+
+1. **Yahoo Finance's precomputed enterprise value field overstated Diageo's EV by ~12x**
+   ($886.6bn vs. an independently-computed ~$68bn) — fixed by computing EV from components
+   (`market_cap + total_debt - total_cash`) rather than trusting the vendor's derived field.
+2. **A defensive ADR-ratio sanity check was itself wrong** — it assumed Yahoo's `sharesOutstanding`
+   for Diageo's ADR needed dividing by the 1:4 ADR ratio; testing against Yahoo's own market cap
+   showed it didn't. The "fix" was solving a problem that didn't exist.
+3. **The risk-free rate came out 10x too low** from an incorrect assumption about how Yahoo's
+   `^TNX` ticker is quoted — caught because 0.53% is an implausible 10-year Treasury yield.
+
+Each was only caught by cross-checking against an independently verifiable number — the
+discipline the research note tries to apply throughout the valuation itself.
 
 ## Usage
 
 ```bash
 pip install -r requirements.txt
-python pull_valuation_data.py                    # print to console
+python pull_valuation_data.py                    # print live data to console
 python pull_valuation_data.py --xlsx out.xlsx     # also write to an Excel file
 ```
 
-## Three data-integrity bugs I caught building this
-
-The most useful part of this project wasn't the happy path — it was three separate
-cases where a data provider's number looked plausible but was wrong, and each one
-only surfaced by cross-checking against an independently known value.
-
-**1. Yahoo's `enterpriseValue` field was off by ~12x.**
-Yahoo's precomputed EV for Diageo's ADR came back as **$886.6bn** — roughly the size
-of a company twice as large as Apple, when Diageo's actual EV is around **$68-71bn**.
-The fix: never trust a vendor's precomputed field for a derived figure — compute it
-yourself from components you can verify individually (`market_cap + total_debt -
-total_cash`), which landed within ~5% of the real, independently-sourced figure.
-
-**2. A "defensive" ADR ratio check was actually introducing a false positive.**
-I added a sanity check assuming Yahoo's `sharesOutstanding` for `DEO` was the
-*ordinary share* count, requiring division by the 1:4 ADR ratio. Testing it against
-Yahoo's own reported market cap showed `price × shares` (no ratio adjustment)
-already matched to within 0.001% — Yahoo's `sharesOutstanding` for ADR tickers is
-already ADR-share-equivalent. The "fix" I'd built was solving a problem that didn't
-exist, and would have fired a false warning on every run.
-
-**3. The risk-free rate came out 10x too low.**
-I initially coded the well-known "CBOE `^TNX` quotes the yield ×10" convention
-(historically true for some data feeds) — dividing Yahoo's raw value by an extra 10.
-The result: a 10-year Treasury yield of 0.53%, obviously wrong. Testing against the
-raw value showed `yfinance`'s `.history()` path returns the yield directly in
-percentage points, not ×10. Removing the extra division gave ~5.25%, consistent with
-where yields have actually been trading.
-
-**The common thread:** every one of these looked fine until checked against an
-independent number. None of the bugs were syntax errors — the code ran cleanly and
-produced a plausible-looking result each time. That's the harder class of bug to
-catch, and the reason every derived figure in this script is checked against
-something verifiable rather than trusted on the strength of a "well-known" API
-convention.
-
-## Output
-
-Two console tables (Diageo snapshot, peer comps with EV multiples) plus a peer
-summary (median/mean/min/max), and the current risk-free rate. With `--xlsx`, the
-same data is written to a `Cover & Assumptions` tab and a `Trading Comps` tab of an
-Excel workbook.
-
 ## Requirements
 
-- Python 3.10+
-- Internet access (queries Yahoo Finance live — no API key needed)
+- Python 3.10+, internet access (queries Yahoo Finance live, no API key needed)
+- Excel or Google Sheets to open the model
+
+## Disclaimer
+
+This is a personal, educational exercise using public information. It is not investment research
+and not investment advice.
 
 ## License
 
